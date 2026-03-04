@@ -3,8 +3,7 @@ import { supabase } from '@/lib/supabase';
 import type { CardSet, Game } from '@/lib/supabase';
 import { normalizeLanguage, translations, type Language } from '@/lib/i18n';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+export const revalidate = 300;
 
 interface GamePageProps {
 	params: { game_id: string } | Promise<{ game_id: string }>;
@@ -117,13 +116,6 @@ const fetchSets = async (
 		.select('set_id, name, language, local_set_slug, master_set_slug')
 		.eq('language', language)
 		.in('set_id', setIds);
-
-	console.log('[catalog] set_localizations fetch', {
-		language,
-		setCount: setIds.length,
-		localizationCount: localizationData?.length ?? 0,
-		error: localizationError?.message ?? null,
-	});
 
 	if (localizationError || !localizationData) {
 		return {

@@ -124,7 +124,8 @@ export default function ProfilePage() {
         .from('cards')
         .select('id, set_id, name, number, set_code, game, rarity, condition, price, image_url')
         .eq('seller_id', userId)
-        .order('id', { ascending: false });
+        .order('id', { ascending: false })
+        .limit(120);
 
       if (!isMounted) return;
 

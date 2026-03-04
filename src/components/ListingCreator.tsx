@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase, formatSupabaseError, errorForConsole } from '@/lib/supabase';
@@ -50,6 +50,24 @@ const SHIPPING_METHOD_OPTIONS = [
   'Expedited (Placeholder)',
   'Tracked Mail (Placeholder)',
 ] as const;
+const MAX_VISIBLE_OPTIONS = 200;
+
+const useDebouncedValue = <T,>(value: T, delayMs: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delayMs);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [value, delayMs]);
+
+  return debouncedValue;
+};
+
 function TypeableSelect({
   id,
   label,
@@ -62,14 +80,38 @@ function TypeableSelect({
 }: TypeableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const deferredValue = useDeferredValue(value);
 
-  const filteredOptions = useMemo(() => {
-    const query = value.trim().toLowerCase();
-    if (!query) return options;
-    return options.filter((option) => option.toLowerCase().includes(query));
-  }, [options, value]);
+  const { filteredOptions, totalMatches } = useMemo(() => {
+    const query = deferredValue.trim().toLowerCase();
+
+    if (!query) {
+      return {
+        filteredOptions: options.slice(0, MAX_VISIBLE_OPTIONS),
+        totalMatches: options.length,
+      };
+    }
+
+    const matches: string[] = [];
+    let count = 0;
+
+    for (const option of options) {
+      if (!option.toLowerCase().includes(query)) continue;
+      count += 1;
+      if (matches.length < MAX_VISIBLE_OPTIONS) {
+        matches.push(option);
+      }
+    }
+
+    return {
+      filteredOptions: matches,
+      totalMatches: count,
+    };
+  }, [options, deferredValue]);
 
   useEffect(() => {
+    if (!isOpen) return;
+
     const handleOutsideClick = (event: MouseEvent) => {
       if (!rootRef.current) return;
       if (!rootRef.current.contains(event.target as Node)) {
@@ -81,7 +123,7 @@ function TypeableSelect({
     return () => {
       document.removeEventListener('mousedown', handleOutsideClick);
     };
-  }, []);
+  }, [isOpen]);
 
   return (
     <div ref={rootRef} className="relative">
@@ -116,6 +158,11 @@ function TypeableSelect({
 
       {isOpen && !disabled ? (
         <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg">
+          {totalMatches > filteredOptions.length ? (
+            <div className="px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-700">
+              Showing first {filteredOptions.length} of {totalMatches} options. Type to narrow results.
+            </div>
+          ) : null}
           {filteredOptions.length === 0 ? (
             <div className="px-3 py-2 text-sm text-zinc-500 dark:text-zinc-400">No matches</div>
           ) : (
@@ -160,6 +207,10 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
 
   const router = useRouter();
   const { withLang } = useLanguage();
+  const nameOptionsCacheRef = useRef(new Map<string, SearchOption[]>());
+  const marketPriceCacheRef = useRef(new Map<string, number | null>());
+  const nameQueryIdRef = useRef(0);
+  const marketPriceQueryIdRef = useRef(0);
 
   const [formData, setFormData] = useState({
     listingKind: 'single_card' as ListingKind,
@@ -190,6 +241,11 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
   const gameLabels = useMemo(() => games.map((game) => game.name), [games]);
   const setLabels = useMemo(() => sets.map((set) => set.name), [sets]);
   const itemLabels = useMemo(() => nameOptions.map((option) => option.label), [nameOptions]);
+  const debouncedItemName = useDebouncedValue(formData.itemName.trim(), 300);
+  const selectedNameOption = useMemo(
+    () => nameOptions.find((option) => option.label === formData.itemName) ?? null,
+    [nameOptions, formData.itemName]
+  );
 
   const setFormField = (field: keyof typeof formData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -308,21 +364,41 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
     const fetchNameOptions = async () => {
       if (!formData.gameId) {
         setNameOptions([]);
+        setLoadingNames(false);
         return;
       }
 
+      const term = debouncedItemName;
+      if (term.length > 0 && term.length < 2) {
+        setNameOptions([]);
+        setLoadingNames(false);
+        return;
+      }
+
+      const cacheKey = [formData.listingKind, formData.gameId, formData.setId || '-', term.toLowerCase()].join('|');
+      const cached = nameOptionsCacheRef.current.get(cacheKey);
+      if (cached) {
+        setNameOptions(cached);
+        setLoadingNames(false);
+        return;
+      }
+
+      const currentQueryId = ++nameQueryIdRef.current;
       setLoadingNames(true);
-      const term = formData.itemName.trim();
 
       if (formData.listingKind === 'single_card') {
-        let query = supabase.from('cards').select('id, name, rarity, set_id, game').order('name').limit(50);
+        let query = supabase
+          .from('cards')
+          .select('id, name, rarity, set_id, game')
+          .order('name')
+          .limit(term ? 50 : 30);
 
         if (formData.setId) query = query.eq('set_id', formData.setId);
         if (selectedGame?.name) query = query.eq('game', selectedGame.name);
         if (term) query = query.ilike('name', `%${term}%`);
 
         const { data } = await query;
-        if (!isMounted) return;
+        if (!isMounted || currentQueryId !== nameQueryIdRef.current) return;
 
         const deduped = new Map<string, SearchOption>();
         (data as Array<{ id: string; name: string; rarity?: string | null }> | null)?.forEach((card) => {
@@ -338,19 +414,21 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
           }
         });
 
-        setNameOptions(Array.from(deduped.values()));
+        const options = Array.from(deduped.values());
+        nameOptionsCacheRef.current.set(cacheKey, options);
+        setNameOptions(options);
       } else {
         let query = supabase
           .from('products')
           .select('id, product_id, name, product_name, set_id')
           .order('name')
-          .limit(50);
+          .limit(term ? 50 : 30);
 
         if (formData.setId) query = query.eq('set_id', formData.setId);
         if (term) query = query.or(`name.ilike.%${term}%,product_name.ilike.%${term}%`);
 
         const { data } = await query;
-        if (!isMounted) return;
+        if (!isMounted || currentQueryId !== nameQueryIdRef.current) return;
 
         const deduped = new Map<string, SearchOption>();
         (
@@ -372,21 +450,20 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
           }
         });
 
-        setNameOptions(Array.from(deduped.values()));
+        const options = Array.from(deduped.values());
+        nameOptionsCacheRef.current.set(cacheKey, options);
+        setNameOptions(options);
       }
 
       setLoadingNames(false);
     };
 
-    const timer = setTimeout(() => {
-      fetchNameOptions();
-    }, 200);
+    fetchNameOptions();
 
     return () => {
       isMounted = false;
-      clearTimeout(timer);
     };
-  }, [formData.gameId, formData.itemName, formData.listingKind, formData.setId, selectedGame?.name]);
+  }, [debouncedItemName, formData.gameId, formData.listingKind, formData.setId, selectedGame?.name]);
 
   useEffect(() => {
     const matched = nameOptions.find((option) => option.label === formData.itemName);
@@ -401,6 +478,10 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
     const fetchRarities = async () => {
       if (formData.listingKind !== 'single_card') {
         setRarityOptions([]);
+        return;
+      }
+
+      if (rarityOptions.length > 0) {
         return;
       }
 
@@ -432,7 +513,7 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
     return () => {
       isMounted = false;
     };
-  }, [formData.listingKind]);
+  }, [formData.listingKind, rarityOptions.length]);
 
   useEffect(() => {
     let isMounted = true;
@@ -463,18 +544,26 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
     let isMounted = true;
 
     const fetchMarketPrice = async () => {
-      const selectedName = formData.itemName.trim();
+      const selectedName = selectedNameOption?.label?.trim() ?? '';
       if (!selectedName) {
         setMarketPrice(null);
         return;
       }
+
+      const cacheKey = [formData.listingKind, formData.setId || '-', selectedName.toLowerCase()].join('|');
+      if (marketPriceCacheRef.current.has(cacheKey)) {
+        setMarketPrice(marketPriceCacheRef.current.get(cacheKey) ?? null);
+        return;
+      }
+
+      const currentQueryId = ++marketPriceQueryIdRef.current;
 
       if (formData.listingKind === 'single_card') {
         let query = supabase.from('cards').select('price').eq('name', selectedName).limit(200);
         if (formData.setId) query = query.eq('set_id', formData.setId);
 
         const { data } = await query;
-        if (!isMounted) return;
+        if (!isMounted || currentQueryId !== marketPriceQueryIdRef.current) return;
 
         const prices =
           (data as Array<{ price?: number | null }> | null)
@@ -482,11 +571,14 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
             .filter((value): value is number => typeof value === 'number') ?? [];
 
         if (prices.length === 0) {
+          marketPriceCacheRef.current.set(cacheKey, null);
           setMarketPrice(null);
           return;
         }
 
-        setMarketPrice(prices.reduce((sum, value) => sum + value, 0) / prices.length);
+        const averagePrice = prices.reduce((sum, value) => sum + value, 0) / prices.length;
+        marketPriceCacheRef.current.set(cacheKey, averagePrice);
+        setMarketPrice(averagePrice);
         return;
       }
 
@@ -499,7 +591,7 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
       if (formData.setId) query = query.eq('set_id', formData.setId);
 
       const { data } = await query;
-      if (!isMounted) return;
+      if (!isMounted || currentQueryId !== marketPriceQueryIdRef.current) return;
 
       const prices =
         (data as Array<{ price?: number | null }> | null)
@@ -507,11 +599,14 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
           .filter((value): value is number => typeof value === 'number') ?? [];
 
       if (prices.length === 0) {
+        marketPriceCacheRef.current.set(cacheKey, null);
         setMarketPrice(null);
         return;
       }
 
-      setMarketPrice(prices.reduce((sum, value) => sum + value, 0) / prices.length);
+      const averagePrice = prices.reduce((sum, value) => sum + value, 0) / prices.length;
+      marketPriceCacheRef.current.set(cacheKey, averagePrice);
+      setMarketPrice(averagePrice);
     };
 
     fetchMarketPrice();
@@ -519,7 +614,7 @@ export default function ListingCreator({ compact = false }: ListingCreatorProps)
     return () => {
       isMounted = false;
     };
-  }, [formData.itemName, formData.listingKind, formData.setId]);
+  }, [formData.listingKind, formData.setId, selectedNameOption?.label]);
 
   const tryInsertWithFallbacks = async (
     table: 'cards' | 'products',
