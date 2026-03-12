@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { CardSet, Game } from '@/lib/supabase';
 import { normalizeLanguage, translations, type Language } from '@/lib/i18n';
+import SetBrowser from '@/components/SetBrowser';
 
 export const revalidate = 300;
 
@@ -108,7 +109,7 @@ const fetchSets = async (
 
 	const { data, error } = await supabase
 		.from('sets')
-		.select('set_id, game_id, name, code, slug')
+		.select('set_id, game_id, name, code, slug, series, release_date')
 		.eq('game_id', gameId)
 		.order('code');
 
@@ -189,6 +190,22 @@ export default async function GameDetailPage({
 	const localizedGameName =
 		translations[language].games?.[gameKey] ?? game?.name;
 	const displayGameName = localizedGameName ?? game?.name ?? 'Game';
+	const visibleSets = sets.map((set) => {
+		const setSlug = set.slug?.trim() ?? '';
+		const localization = localizations[set.set_id];
+		const setName = language === 'en' ? set.name : localization?.name ?? set.name;
+		const localizedSlug = localization?.localSetSlug?.trim();
+		const hrefSlug = language === 'en' || !localizedSlug ? setSlug : localizedSlug;
+
+		return {
+			setId: set.set_id,
+			code: set.code,
+			name: setName,
+			series: typeof set.series === 'string' ? set.series : null,
+			releaseDate: typeof set.release_date === 'string' ? set.release_date : null,
+			href: `/catalog/${gameSlug}/${hrefSlug}${langParam}`,
+		};
+	});
 
 	return (
 		<div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -228,36 +245,19 @@ export default async function GameDetailPage({
 							</p>
 						</div>
 					) : (
-						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-							{sets.map((set) => {
-								const setSlug = set.slug?.trim() ?? '';
-								const localization = localizations[set.set_id];
-								const setName =
-									language === 'en'
-										? set.name
-										: localization?.name ?? set.name;
-								const localizedSlug = localization?.localSetSlug?.trim();
-								const hrefSlug =
-									language === 'en' || !localizedSlug
-										? setSlug
-										: localizedSlug;
-
-								return (
-									<Link
-										key={set.set_id}
-										href={`/catalog/${gameSlug}/${hrefSlug}${langParam}`}
-										className="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm hover:shadow-md transition-shadow"
-									>
-										<p className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-											{set.code}
-										</p>
-										<h2 className="mt-2 text-xl font-semibold text-zinc-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
-											{setName}
-										</h2>
-									</Link>
-								);
-							})}
-						</div>
+						<SetBrowser
+							sets={visibleSets}
+							labels={{
+								filterSeries: translations[language].catalog.filterSeries,
+								allSeries: translations[language].catalog.allSeries,
+								sortBy: translations[language].catalog.sortBy,
+								sortCode: translations[language].catalog.sortCode,
+								sortName: translations[language].catalog.sortName,
+								sortReleaseNewest: translations[language].catalog.sortReleaseNewest,
+								sortReleaseOldest: translations[language].catalog.sortReleaseOldest,
+								visibleResults: translations[language].catalog.visibleResults,
+							}}
+						/>
 					)}
 				</div>
 			</div>

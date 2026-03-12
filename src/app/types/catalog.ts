@@ -33,6 +33,8 @@ export interface CardSet {
   slug: string;
   name: string;           // Base/English name
   code: string;           // e.g., "OP01"
+  series?: string | null;
+  release_date?: string | null;
   set_localizations?: SetLocalization[]; // Joined data
 }
 
@@ -86,6 +88,10 @@ export interface Product {
   product_name?: string;
   product_type?: string;
   category?: string;
+  series?: string | null;
+  release_date?: string | null;
+  product_slug?: string | null;
+  local_slug?: string | null;
   image_url?: string | null;
   price?: number | null;
   [key: string]: unknown;

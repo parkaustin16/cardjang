@@ -1,10 +1,41 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { Game } from '@/lib/supabase';
 import { useLanguage } from '@/lib/i18n-client';
+
+type GameLanguageOption = {
+	label: string;
+	slug: string;
+	gameId: string;
+	sortOrder: number;
+};
+
+type GroupedGame = {
+	key: string;
+	name: string;
+	sortName: string;
+	options: GameLanguageOption[];
+};
+
+const LANGUAGE_ORDER: Record<string, number> = {
+	en: 0,
+	kr: 1,
+	jp: 2,
+};
+
+const extractLanguageCode = (slug: string): string => {
+	const trimmedSlug = slug.trim().toLowerCase();
+	const parts = trimmedSlug.split('-');
+	const suffix = parts[parts.length - 1];
+	return suffix.length === 2 ? suffix : 'en';
+};
+
+const removeLanguageSuffix = (slug: string): string =>
+	slug.trim().replace(/-[a-z]{2}$/i, '');
 
 export default function CatalogPage() {
 	const { t, withLang } = useLanguage();
@@ -40,6 +71,57 @@ export default function CatalogPage() {
 			isMounted = false;
 		};
 	}, []);
+
+	const groupedGames = useMemo<GroupedGame[]>(() => {
+		const groups = new Map<string, GroupedGame>();
+
+		for (const game of games) {
+			const rawSlug = game.slug?.trim() ?? '';
+			if (!rawSlug) continue;
+
+			const baseSlug = removeLanguageSuffix(rawSlug);
+			const languageCode = extractLanguageCode(rawSlug);
+			const gameKey = (baseSlug || game.name)
+				.trim()
+				.toLowerCase()
+				.replace(/\s+/g, '-');
+			const displayName = t.games?.[gameKey] ?? baseSlug
+				.split('-')
+				.map((segment) =>
+					segment.length > 0
+						? segment.charAt(0).toUpperCase() + segment.slice(1)
+						: segment
+				)
+				.join(' ');
+
+			const existing = groups.get(baseSlug);
+			const option: GameLanguageOption = {
+				label: t.languageNames?.[languageCode] ?? languageCode.toUpperCase(),
+				slug: rawSlug,
+				gameId: game.game_id,
+				sortOrder: LANGUAGE_ORDER[languageCode] ?? 99,
+			};
+
+			if (existing) {
+				existing.options.push(option);
+				continue;
+			}
+
+			groups.set(baseSlug, {
+				key: baseSlug,
+				name: displayName,
+				sortName: baseSlug.replace(/-/g, ' '),
+				options: [option],
+			});
+		}
+
+		return Array.from(groups.values())
+			.map((group) => ({
+				...group,
+				options: group.options.sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label)),
+			}))
+			.sort((a, b) => a.sortName.localeCompare(b.sortName));
+	}, [games, t.games, t.languageNames]);
 
 	return (
 		<div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -85,31 +167,38 @@ export default function CatalogPage() {
 						</div>
 					) : (
 						<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-							{games.map((game) => {
-								const gameSlug = game.slug?.trim() ?? '';
-								const normalizedSlug = gameSlug.replace(/-[a-z]{2}$/i, '');
-								const gameKey = (normalizedSlug || game.name)
-									.trim()
-									.toLowerCase()
-									.replace(/\s+/g, '-');
-								const displayName = t.games?.[gameKey] ?? game.name;
-
-								return (
-									<Link
-										key={game.game_id}
-										href={withLang(`/catalog/${gameSlug}`)}
-										prefetch
-										className="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm hover:shadow-md transition-shadow"
-									>
-										<h2 className="text-xl font-semibold text-zinc-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
-											{displayName}
-										</h2>
-										<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-											{t.catalog.viewSets}
-										</p>
-									</Link>
-								);
-							})}
+							{groupedGames.map((game) => (
+								<details
+									key={game.key}
+									className="group rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm"
+								>
+									<summary className="flex cursor-pointer list-none items-center justify-between gap-4">
+										<div>
+											<h2 className="text-xl font-semibold text-zinc-900 dark:text-white group-open:text-blue-600 dark:group-open:text-blue-400">
+												{game.name}
+											</h2>
+											<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+												{t.catalog.viewSets}
+											</p>
+										</div>
+										<span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+											{game.options.length} option{game.options.length === 1 ? '' : 's'}
+										</span>
+									</summary>
+									<div className="mt-4 flex flex-col gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+										{game.options.map((option) => (
+											<Link
+												key={option.gameId}
+												href={withLang(`/catalog/${option.slug}`)}
+												prefetch
+												className="flex items-center rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-700 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-blue-700 dark:hover:text-blue-400"
+											>
+												<span>{option.label}</span>
+											</Link>
+										))}
+									</div>
+								</details>
+							))}
 						</div>
 					)}
 				</div>

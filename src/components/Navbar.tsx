@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { useLanguage } from '@/lib/i18n-client';
 import { usePathname } from 'next/navigation';
+import LanguageToggle from '@/components/LanguageToggle';
 
 export default function Navbar() {
   const [user, setUser] = useState<User | null>(null);
@@ -69,7 +70,10 @@ export default function Navbar() {
               )}
             </div>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:block">
+              <LanguageToggle />
+            </div>
             {user ? (
               <>
                 <Link
@@ -110,6 +114,9 @@ export default function Navbar() {
 
         {isMenuOpen ? (
           <div className="sm:hidden border-t border-zinc-200 dark:border-zinc-800 px-4 py-3 space-y-2">
+            <div className="pb-2">
+              <LanguageToggle />
+            </div>
             <Link
               href={withLang('/catalog')}
               onClick={() => setIsMenuOpen(false)}

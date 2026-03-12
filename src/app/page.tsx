@@ -1,7 +1,6 @@
 "use client";
 
 import Link from 'next/link';
-import LanguageToggle from '@/components/LanguageToggle';
 import { useLanguage } from '@/lib/i18n-client';
 
 export default function Home() {
@@ -12,9 +11,6 @@ export default function Home() {
       {/* Hero Section */}
       <div className="relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
-          <div className="flex justify-end">
-            <LanguageToggle />
-          </div>
           <div className="text-center">
             <h1 className="text-4xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-5xl md:text-6xl">
               {t.home.titlePrefix}{' '}

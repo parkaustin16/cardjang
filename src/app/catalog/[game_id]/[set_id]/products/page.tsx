@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import type { Product } from '@/lib/supabase';
 import { normalizeLanguage, translations } from '@/lib/i18n';
 import { fetchGameId, fetchSet, fetchSetLocalization } from '../set-data';
+import ProductBrowser from '@/components/ProductBrowser';
 
 export const revalidate = 60;
 
@@ -199,6 +200,28 @@ export default async function SetProductsPage({
     (total, group) => total + group.listings.length,
     0
   );
+  const productGroups = productListingGroups.map((group) => {
+    const primaryListing = group.listings[0];
+
+    return {
+      key: group.key,
+      name: group.name,
+      productType: group.productType,
+      imageUrl: group.imageUrl,
+      series:
+        typeof primaryListing?.series === 'string' ? primaryListing.series : null,
+      releaseDate:
+        typeof primaryListing?.release_date === 'string'
+          ? primaryListing.release_date
+          : null,
+      lowestPrice: getLowestPrice(group.listings),
+      listings: group.listings.map((listing, index) => ({
+        id: getProductId(listing, index),
+        price: typeof listing.price === 'number' ? listing.price : null,
+        productType: getProductType(listing),
+      })),
+    };
+  });
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -249,93 +272,32 @@ export default async function SetProductsPage({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              {productListingGroups.map((group) => {
-                const primaryListing = group.listings[0];
-                const lowestPrice = getLowestPrice(group.listings);
-
-                return (
-                  <div
-                    key={group.key}
-                    className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:p-6"
-                  >
-                    <div className="flex gap-4">
-                      <div className="h-20 w-20 flex-shrink-0 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 overflow-hidden flex items-center justify-center">
-                        {group.imageUrl ? (
-                          <Image
-                            src={group.imageUrl}
-                            alt={group.name}
-                            width={80}
-                            height={80}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-xs text-zinc-400">No Image</span>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">
-                          {group.name}
-                        </h2>
-                        {group.productType ? (
-                          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                            {group.productType}
-                          </p>
-                        ) : null}
-                        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                          {group.listings.length} listing{group.listings.length === 1 ? '' : 's'} available
-                        </p>
-                      </div>
-                      {typeof primaryListing?.price === 'number' ? (
-                        <div className="text-right">
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                            {t.catalog.priceLabel}
-                          </p>
-                          <p className="text-lg font-semibold text-zinc-900 dark:text-white">
-                            {formatPrice(primaryListing.price)}
-                          </p>
-                          {lowestPrice !== null && lowestPrice !== primaryListing.price ? (
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                              from {formatPrice(lowestPrice)}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/40 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                        Listings
-                      </p>
-                      <div className="mt-2 divide-y divide-zinc-200 dark:divide-zinc-800">
-                        {group.listings.map((listing, index) => {
-                          const price =
-                            typeof listing.price === 'number'
-                              ? listing.price
-                              : null;
-
-                          return (
-                            <div
-                              key={getProductId(listing, index)}
-                              className="flex items-center justify-between py-2 text-sm gap-4"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="inline-flex items-center rounded-full border border-zinc-300 dark:border-zinc-700 px-2 py-0.5 text-xs text-zinc-600 dark:text-zinc-300">
-                                  {getProductType(listing) ?? 'Sealed product'}
-                                </span>
-                              </div>
-                              <span className="font-semibold text-zinc-900 dark:text-white">
-                                {price === null ? 'Price unavailable' : formatPrice(price)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <ProductBrowser
+              groups={productGroups}
+              labels={{
+                filterSeries: t.catalog.filterSeries,
+                filterProductType: t.catalog.filterProductType,
+                allSeries: t.catalog.allSeries,
+                allProductTypes: t.catalog.allProductTypes,
+                sortBy: t.catalog.sortBy,
+                sortName: t.catalog.sortName,
+                sortReleaseNewest: t.catalog.sortReleaseNewest,
+                sortReleaseOldest: t.catalog.sortReleaseOldest,
+                sortLowestPrice: t.catalog.sortLowestPrice,
+                visibleResults: t.catalog.visibleResults,
+                productsLabel: 'Products',
+                totalListingsLabel: 'Total Listings',
+                priceLabel: t.catalog.priceLabel,
+                emptyMessage: t.catalog.productsEmpty,
+                listingsLabel: 'Listings',
+                listingAvailableSingular: 'listing available',
+                listingAvailablePlural: 'listings available',
+                priceUnavailable: 'Price unavailable',
+                sealedProductFallback: 'Sealed product',
+                noImage: 'No Image',
+                fromPrefix: 'from',
+              }}
+            />
           )}
         </div>
       </div>
