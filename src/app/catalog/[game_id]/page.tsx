@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import type { CardSet, Game } from '@/lib/supabase';
 import { normalizeLanguage, translations, type Language } from '@/lib/i18n';
+import { matchesLegacySlug } from '@/lib/slug';
 import SetBrowser from '@/components/SetBrowser';
 
 export const revalidate = 300;
@@ -66,6 +67,25 @@ const fetchGame = async (
 
 	if (legacySlugData) {
 		return { game: legacySlugData, errorMessage: null };
+	}
+
+	const { data: allGames, error: allGamesError } = await supabase
+		.from('games')
+		.select('game_id, name, slug');
+
+	if (allGamesError) {
+		return {
+			game: null,
+			errorMessage: allGamesError.message,
+		};
+	}
+
+	const legacyGameMatch = (allGames ?? []).find((game) =>
+		matchesLegacySlug(normalizedSlug, game.slug)
+	);
+
+	if (legacyGameMatch) {
+		return { game: legacyGameMatch, errorMessage: null };
 	}
 
 	const isUuid =

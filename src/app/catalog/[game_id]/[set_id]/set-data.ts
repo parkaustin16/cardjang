@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import type { CardSet } from '@/lib/supabase';
 import type { Language } from '@/lib/i18n';
+import { matchesLegacySlug } from '@/lib/slug';
 
 type SetLocalizationRow = {
   set_id: string;
@@ -65,6 +66,25 @@ export const fetchGameId = async (
 
   if (legacySlugData) {
     return { gameId: legacySlugData.game_id, errorMessage: null };
+  }
+
+  const { data: allGames, error: allGamesError } = await supabase
+    .from('games')
+    .select('game_id, slug');
+
+  if (allGamesError) {
+    return {
+      gameId: null,
+      errorMessage: allGamesError.message,
+    };
+  }
+
+  const legacyGameMatch = (allGames ?? []).find((game) =>
+    matchesLegacySlug(normalizedSlug, game.slug)
+  );
+
+  if (legacyGameMatch) {
+    return { gameId: legacyGameMatch.game_id, errorMessage: null };
   }
 
   const isUuid =
@@ -233,7 +253,71 @@ export const fetchSet = async (
     .limit(1)
     .maybeSingle();
 
-  if (error || fallbackError || !fallbackData) {
+  if (fallbackData) {
+    return { set: fallbackData, localizedName: null, errorMessage: null };
+  }
+
+  const { data: allSets, error: allSetsError } = await supabase
+    .from('sets')
+    .select('set_id, game_id, name, code, slug')
+    .eq('game_id', gameId);
+
+  if (allSetsError) {
+    return {
+      set: null,
+      localizedName: null,
+      errorMessage: allSetsError.message,
+    };
+  }
+
+  const legacySetMatch = (allSets ?? []).find((set) =>
+    matchesLegacySlug(normalizedSlug, set.slug)
+  );
+
+  if (legacySetMatch) {
+    return { set: legacySetMatch, localizedName: null, errorMessage: null };
+  }
+
+  if (language !== 'en' && allSets && allSets.length > 0) {
+    const { data: allLocalizations, error: allLocalizationsError } = await supabase
+      .from('set_localizations')
+      .select('set_id, name, local_set_slug, master_set_slug, language')
+      .in(
+        'set_id',
+        allSets.map((set) => set.set_id)
+      );
+
+    if (allLocalizationsError) {
+      return {
+        set: null,
+        localizedName: null,
+        errorMessage: allLocalizationsError.message,
+      };
+    }
+
+    const matchingLocalization = pickPreferredSetLocalization(
+      ((allLocalizations ?? []) as SetLocalizationRow[]).filter((localization) =>
+        matchesLegacySlug(normalizedSlug, localization.local_set_slug)
+      ),
+      language
+    );
+
+    if (matchingLocalization) {
+      const localizedSet = allSets.find(
+        (set) => set.set_id === matchingLocalization.set_id
+      );
+
+      if (localizedSet) {
+        return {
+          set: localizedSet,
+          localizedName: matchingLocalization.name,
+          errorMessage: null,
+        };
+      }
+    }
+  }
+
+  if (error || fallbackError) {
     return {
       set: null,
       localizedName: null,
@@ -244,7 +328,11 @@ export const fetchSet = async (
     };
   }
 
-  return { set: fallbackData, localizedName: null, errorMessage: null };
+  return {
+    set: null,
+    localizedName: null,
+    errorMessage: 'Unknown error fetching set',
+  };
 };
 
 export const fetchSetLocalizationDetails = async (
